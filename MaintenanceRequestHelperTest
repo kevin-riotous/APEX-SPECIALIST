@@ -1,0 +1,65 @@
+@isTest
+public class MaintenanceRequestHelperTest {
+    @isTest
+    static void testUpdateWorkOrders() {
+        // Create test Cases (work orders)
+        List<Case> workOrders = new List<Case>();
+
+        // Create Case with 'Repair' type
+        Case workOrder1 = new Case(
+            Status = 'Working',
+            Type = 'Repair',
+            Subject = 'Test Repair',
+            Origin = 'Web',
+            Date_Reported__c = Date.today()
+        );
+        workOrders.add(workOrder1);
+
+        // Create Case with 'Routine Maintenance' type
+        Case workOrder2 = new Case(
+            Status = 'Working',
+            Type = 'Routine Maintenance',
+            Subject = 'Test Maintenance',
+            Origin = 'Web',
+            Date_Reported__c = Date.today()
+        );
+        workOrders.add(workOrder2);
+
+        insert workOrders;
+
+        // Add Equipment Maintenance Item for both
+        List<Equipment_Maintenance_Item__c> items = new List<Equipment_Maintenance_Item__c>();
+        for (Case c : workOrders) {
+            items.add(new Equipment_Maintenance_Item__c(
+                Maintenance_Request__c = c.Id,
+                Quantity__c = 1
+            ));
+        }
+        insert items;
+
+        // Now update both work orders to Closed
+        for (Case c : workOrders) {
+            c.Status = 'Closed';
+        }
+        update workOrders;
+
+        // Prepare updatedCases and oldCaseMap
+        List<Case> updatedCases = [SELECT Id, Status, Type FROM Case WHERE Id IN :workOrders];
+        Map<Id, Case> oldCaseMap = new Map<Id, Case>();
+        for (Case c : workOrders) {
+            oldCaseMap.put(c.Id, new Case(Id = c.Id, Status = 'Working', Type = c.Type));
+        }
+
+        Test.startTest();
+        MaintenanceRequestHelper.updateWorkOrders(updatedCases, oldCaseMap);
+        Test.stopTest();
+
+        // Assert new Routine Maintenance Cases created
+        List<Case> newCases = [SELECT Id, ParentId FROM Case WHERE ParentId IN :workOrders];
+        System.assertEquals(2, newCases.size(), 'Two new Routine Maintenance cases should be created.');
+
+        // Assert cloned work parts for both
+        Integer clonedItemsCount = [SELECT count() FROM Equipment_Maintenance_Item__c WHERE Maintenance_Request__c IN :newCases];
+        System.assertEquals(2, clonedItemsCount, 'Each new case should have a cloned Equipment Maintenance Item.');
+    }
+}
