@@ -1,0 +1,19 @@
+public with sharing class AccountProcessor {
+
+    @future
+    public static void countContacts(List<Id> accountIds) {
+        // Query Accounts
+        List<Account> accounts = [SELECT Id, Name FROM Account WHERE Id IN :accountIds];
+        List<Account> updatedAccounts = new List<Account>();
+
+        for (Account acc : accounts) {
+            // Get number of contacts for this Account
+            Integer contactCount = [SELECT count() FROM Contact WHERE AccountId = :acc.Id];
+            acc.Number_of_Contacts__c = contactCount;
+            updatedAccounts.add(acc);
+        }
+
+        // Update Accounts with the contact count
+        update updatedAccounts;
+    }
+}
