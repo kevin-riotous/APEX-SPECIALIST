@@ -1,9 +1,11 @@
 public with sharing class MaintenanceRequestHelper {
-    public static void updateWorkOrders(List<Case> updWorkOrders, Map<Id, Case> nonUpdCaseMap) {
+    
+    public static void updateWorkOrders(List<Case> updWorkOrders, Map<Id, Case> oldWorkOrdersMap) {
         Set<Id> validIds = new Set<Id>();
 
+        // Identify eligible closed Maintenance Requests of type Repair or Routine Maintenance
         for (Case c : updWorkOrders) {
-            if (nonUpdCaseMap.get(c.Id).Status != 'Closed' && c.Status == 'Closed') {
+            if (oldWorkOrdersMap.get(c.Id).Status != 'Closed' && c.Status == 'Closed') {
                 if (c.Type == 'Repair' || c.Type == 'Routine Maintenance') {
                     validIds.add(c.Id);
                 }
@@ -11,16 +13,32 @@ public with sharing class MaintenanceRequestHelper {
         }
 
         if (!validIds.isEmpty()) {
-            List<Case> newCases = new List<Case>();
-
+            // Fetch closed Cases with their related Equipment Maintenance Items
             Map<Id, Case> closedCasesMap = new Map<Id, Case>(
-                [SELECT Id, Vehicle__c, Equipment__c,
-                    (SELECT Id, Equipment__c, Quantity__c FROM Equipment_Maintenance_Items__r)
+                [SELECT Id, Vehicle__c, Equipment__c, 
+                        (SELECT Id, Equipment__c, Quantity__c FROM Equipment_Maintenance_Items__r)
                  FROM Case
                  WHERE Id IN :validIds]
             );
 
-            List<Equipment_Maintenance_Item__c> clonedWorkParts = new List<Equipment_Maintenance_Item__c>();
+            // Fetch shortest Maintenance Cycle per Maintenance Request (Case)
+            Map<Id, Decimal> maintenanceCycles = new Map<Id, Decimal>();
+            AggregateResult[] results = [
+                SELECT Maintenance_Request__c, MIN(Equipment__r.Maintenance_Cycle__c) minCycle
+                FROM Equipment_Maintenance_Item__c
+                WHERE Maintenance_Request__c IN :validIds
+                GROUP BY Maintenance_Request__c
+            ];
+
+            for (AggregateResult ar : results) {
+                maintenanceCycles.put(
+                    (Id) ar.get('Maintenance_Request__c'),
+                    (Decimal) ar.get('minCycle')
+                );
+            }
+
+            // Create new Routine Maintenance Cases
+            List<Case> newCases = new List<Case>();
 
             for (Case oldCase : closedCasesMap.values()) {
                 Case newCase = new Case(
@@ -33,20 +51,31 @@ public with sharing class MaintenanceRequestHelper {
                     Origin = 'Web',
                     Date_Reported__c = Date.today()
                 );
+
+                if (maintenanceCycles.containsKey(oldCase.Id)) {
+                    newCase.Date_Due__c = Date.today().addDays((Integer) maintenanceCycles.get(oldCase.Id));
+                }
+
                 newCases.add(newCase);
             }
 
             insert newCases;
 
+            // Clone Equipment Maintenance Items to new Cases
+            List<Equipment_Maintenance_Item__c> clonedWorkParts = new List<Equipment_Maintenance_Item__c>();
+
             for (Case newCase : newCases) {
-                for (Equipment_Maintenance_Item__c item : closedCasesMap.get(newCase.ParentId).Equipment_Maintenance_Items__r) {
-                    Equipment_Maintenance_Item__c itemClone = item.clone();
+                Case oldCase = closedCasesMap.get(newCase.ParentId);
+                for (Equipment_Maintenance_Item__c item : oldCase.Equipment_Maintenance_Items__r) {
+                    Equipment_Maintenance_Item__c itemClone = item.clone(false, true, false, false);
                     itemClone.Maintenance_Request__c = newCase.Id;
                     clonedWorkParts.add(itemClone);
                 }
             }
 
-            insert clonedWorkParts;
+            if (!clonedWorkParts.isEmpty()) {
+                insert clonedWorkParts;
+            }
         }
     }
 }
