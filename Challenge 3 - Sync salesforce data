@@ -1,3 +1,12 @@
+Debug Code :- System.enqueueJob(new WarehouseCalloutService()); 
+( Execute this after pasting the WarehouseCalloutService code below )
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+WarehouseCalloutService
+
+
+
 public with sharing class WarehouseCalloutService implements Queueable, Database.AllowsCallouts {
 
     private static final String WAREHOUSE_URL = 'https://th-superbadge-apex.herokuapp.com/equipment';
