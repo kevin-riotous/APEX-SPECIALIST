@@ -1,0 +1,52 @@
+public with sharing class MaintenanceRequestHelper {
+    public static void updateWorkOrders(List<Case> updWorkOrders, Map<Id, Case> nonUpdCaseMap) {
+        Set<Id> validIds = new Set<Id>();
+
+        for (Case c : updWorkOrders) {
+            if (nonUpdCaseMap.get(c.Id).Status != 'Closed' && c.Status == 'Closed') {
+                if (c.Type == 'Repair' || c.Type == 'Routine Maintenance') {
+                    validIds.add(c.Id);
+                }
+            }
+        }
+
+        if (!validIds.isEmpty()) {
+            List<Case> newCases = new List<Case>();
+
+            Map<Id, Case> closedCasesMap = new Map<Id, Case>(
+                [SELECT Id, Vehicle__c, Equipment__c,
+                    (SELECT Id, Equipment__c, Quantity__c FROM Equipment_Maintenance_Items__r)
+                 FROM Case
+                 WHERE Id IN :validIds]
+            );
+
+            List<Equipment_Maintenance_Item__c> clonedWorkParts = new List<Equipment_Maintenance_Item__c>();
+
+            for (Case oldCase : closedCasesMap.values()) {
+                Case newCase = new Case(
+                    ParentId = oldCase.Id,
+                    Status = 'New',
+                    Subject = 'Routine Maintenance',
+                    Type = 'Routine Maintenance',
+                    Vehicle__c = oldCase.Vehicle__c,
+                    Equipment__c = oldCase.Equipment__c,
+                    Origin = 'Web',
+                    Date_Reported__c = Date.today()
+                );
+                newCases.add(newCase);
+            }
+
+            insert newCases;
+
+            for (Case newCase : newCases) {
+                for (Equipment_Maintenance_Item__c item : closedCasesMap.get(newCase.ParentId).Equipment_Maintenance_Items__r) {
+                    Equipment_Maintenance_Item__c itemClone = item.clone();
+                    itemClone.Maintenance_Request__c = newCase.Id;
+                    clonedWorkParts.add(itemClone);
+                }
+            }
+
+            insert clonedWorkParts;
+        }
+    }
+}
